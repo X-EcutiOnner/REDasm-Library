@@ -307,14 +307,10 @@ static void _rd_render_function_row(RDRenderer* r, const RDSegment* seg,
     const RDProcessorPlugin* p = r->context->processorplugin;
     RDAddress address = rd_i_renderer_new_row(r, seg, idx, sub_line, indent);
     const RDTypeDef* tdef = rd_function_get_type_def(r->context, address);
+    bool is_noret = rd_i_function_is_noret(r->context, address, tdef);
 
-    if(p->render_function) {
-        RDFunction f = {
-            .address = address,
-            .type = tdef,
-            .is_noret = rd_i_function_is_noret(r->context, address, tdef),
-        };
-
+    if(p->render_function && tdef) {
+        RDFunction f = {.address = address, .type = tdef, .is_noret = is_noret};
         p->render_function(r, &f, r->context->processor);
         return;
     }
@@ -331,7 +327,7 @@ static void _rd_render_function_row(RDRenderer* r, const RDSegment* seg,
             rd_renderer_ws(r, 1);
         }
 
-        if(rd_function_is_noret(r->context, address)) {
+        if(is_noret) {
             rd_renderer_text(r, "noreturn ", RD_THEME_FUNCTION,
                              RD_THEME_BACKGROUND);
         }
