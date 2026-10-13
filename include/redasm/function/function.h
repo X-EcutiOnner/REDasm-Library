@@ -3,6 +3,12 @@
 #include <redasm/config.h>
 #include <redasm/types/def.h>
 
+typedef struct RDFunction {
+    RDAddress address;
+    const RDTypeDef* type;
+    bool is_noret;
+} RDFunction;
+
 // clang-format off
 RD_API bool rd_function_is_noret(const RDContext* self, RDAddress address);
 RD_API bool rd_function_find(const RDContext* self, RDAddress address, RDAddress* entry);

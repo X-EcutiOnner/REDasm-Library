@@ -59,13 +59,8 @@ bool rd_i_function_find_rel(const RDContext* self, RDAddress address,
 }
 
 bool rd_function_is_noret(const RDContext* self, RDAddress address) {
-    const RDTypeDef* tdef = rd_function_get_type_def(self, address);
-    if(!tdef) return false; // not a function
-
-    if(tdef->func_.is_noret) return true;
-
-    const RDChunk* head = rd_i_chunks_find_head(self, address);
-    return head && head->is_noret;
+    return rd_i_function_is_noret(self, address,
+                                  rd_function_get_type_def(self, address));
 }
 
 bool rd_function_find(const RDContext* self, RDAddress address,
@@ -94,4 +89,13 @@ const RDTypeDef* rd_function_get_type_def(const RDContext* self,
     if(tdef && tdef->kind != RD_TKIND_FUNC) tdef = NULL;
 
     return tdef ? tdef : rd_i_typedef_find(self, "function");
+}
+
+bool rd_i_function_is_noret(const RDContext* self, RDAddress address,
+                            const RDTypeDef* tdef) {
+    if(!tdef || tdef->kind != RD_TKIND_FUNC) return false;
+    if(tdef->func_.is_noret) return true;
+
+    const RDChunk* head = rd_i_chunks_find_head(self, address);
+    return head && head->is_noret;
 }

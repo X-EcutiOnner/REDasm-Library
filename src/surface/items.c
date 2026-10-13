@@ -1,5 +1,6 @@
 #include "items.h"
 #include "core/context.h"
+#include "function/function.h"
 #include "io/flagsbuffer.h"
 #include "support/containers.h"
 #include "support/error.h"
@@ -305,15 +306,20 @@ static void _rd_render_function_row(RDRenderer* r, const RDSegment* seg,
                                     usize idx, usize sub_line, usize indent) {
     const RDProcessorPlugin* p = r->context->processorplugin;
     RDAddress address = rd_i_renderer_new_row(r, seg, idx, sub_line, indent);
+    const RDTypeDef* tdef = rd_function_get_type_def(r->context, address);
 
     if(p->render_function) {
-        p->render_function(r, address, r->context->processor);
+        RDFunction f = {
+            .address = address,
+            .type = tdef,
+            .is_noret = rd_i_function_is_noret(r->context, address, tdef),
+        };
+
+        p->render_function(r, &f, r->context->processor);
         return;
     }
 
     _rd_render_modifiers(r, seg, idx, RD_THEME_FUNCTION, RD_THEME_BACKGROUND);
-
-    const RDTypeDef* tdef = rd_function_get_type_def(r->context, address);
 
     if(tdef) {
         const RDFunctionType* f_type = &tdef->func_;
