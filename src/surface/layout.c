@@ -290,7 +290,7 @@ usize rd_i_item_layout(RDContext* ctx, RDRenderFlags flags,
     panic_if(rd_flagsbuffer_has_tail(seg->flags, idx),
              "tail detected @ %" PRIX64, rd_segment_get_start(seg) + idx);
 
-    if(!idx && !(flags & RD_RF_NO_SEGMENT))
+    if(!idx && !(flags & RD_RF_NO_SEGMENT_LINE))
         _rd_layout_push(out, RD_ROWKIND_SEGMENT, 0, 0);
 
     usize advance;

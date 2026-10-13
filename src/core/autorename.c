@@ -1,4 +1,5 @@
 #include "autorename.h"
+#include "function/function.h"
 #include "io/flagsbuffer.h"
 #include "support/containers.h"
 #include "support/utils.h"
@@ -55,18 +56,19 @@ static const char* _rd_resolve_name(RDContext* ctx, RDAddress target,
 static void _rd_autorename_functions(RDContext* ctx) {
     RD_LOG_INFO("autorenaming functions");
     RDCharVect namebuf = {0};
-    RDIL* rdil = rd_il_create(ctx, NULL);
+    RDIL* rdil = rd_il_create(ctx);
 
-    RDFunction** it;
-    vect_each(it, &ctx->functions) {
-        RDFunction* f = *it;
+    RDAddressVect functions = {0};
+    rd_i_db_get_all_functions(ctx, &functions);
 
+    const RDAddress* addr;
+    vect_each(addr, &functions) {
         RDName n;
-        if(rd_i_get_name(ctx, rd_function_get_address(f), false, &n) &&
+        if(rd_i_get_name(ctx, *addr, false, &n) &&
            n.confidence > RD_CONFIDENCE_AUTO)
             continue;
 
-        rd_il_assign(rdil, f);
+        rd_il_assign(rdil, *addr);
 
         RDAddress resolved;
         RDConfidence c;
@@ -75,7 +77,7 @@ static void _rd_autorename_functions(RDContext* ctx) {
 
         const RDTypeDef* tdef = rd_i_typedef_find(ctx, resolved_name);
         if(tdef && tdef->kind == RD_TKIND_FUNC)
-            rd_i_function_set_type_def(f, tdef);
+            rd_i_function_set_type_def(ctx, *addr, tdef);
 
         const RDSegment* seg = rd_i_db_find_segment(ctx, resolved);
         assert(seg);
@@ -91,11 +93,12 @@ static void _rd_autorename_functions(RDContext* ctx) {
             auto_name = rd_i_format(&namebuf, "j_%s", resolved_name);
 
         assert(auto_name);
-        rd_i_set_name(ctx, rd_function_get_address(f), auto_name, c);
+        rd_i_set_name(ctx, *addr, auto_name, c);
     }
 
     rd_il_destroy(rdil);
     vect_destroy(&namebuf);
+    vect_destroy(&functions);
 }
 
 static void _rd_autorename_types(RDContext* ctx) {
@@ -163,10 +166,11 @@ const char* rd_resolve_name(RDContext* self, RDAddress address,
         return n.value;
     }
 
-    const RDFunction* f = rd_find_function(self, address);
-    if(!f) return NULL;
+    RDAddress entry;
+    if(!rd_function_find(self, address, &entry)) return NULL;
 
-    RDIL* rdil = rd_il_create(self, f);
+    RDIL* rdil = rd_il_create(self);
+    rd_il_assign(rdil, entry);
     const char* name = rd_i_resolve_name(self, rdil, resolved, NULL);
     rd_il_destroy(rdil);
     return name;

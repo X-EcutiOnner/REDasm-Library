@@ -6,8 +6,8 @@
 
 typedef struct RDArgTarget {
     RDAddress address;
-    const RDTypeDef* tdef;
-    const RDCallConv* cc;
+    const RDTypeDef* type_def;
+    const RDCallConv* callconv;
 } RDArgTarget;
 
 typedef struct RDArgTargetVect {
@@ -128,18 +128,24 @@ static void _rd_discover_call_args(RDContext* ctx, const RDTypeDef* tdef,
 static void _rd_discover_collect_targets(RDContext* ctx,
                                          RDArgTargetVect* targets) {
     // (1) thunks: prototype attached to a function by autorename
-    RDFunction** fit;
-    vect_each(fit, &ctx->functions) {
-        const RDFunction* f = *fit;
+    RDAddressVect functions = {0};
+    rd_i_db_get_all_functions(ctx, &functions);
+
+    const RDAddress* addr;
+    vect_each(addr, &functions) {
+        const RDTypeDef* tdef = rd_function_get_type_def(ctx, *addr);
+
         const RDCallConv* cc = NULL;
-        if(!_rd_discover_is_call_target(ctx, f->type_def, &cc)) continue;
+        if(!_rd_discover_is_call_target(ctx, tdef, &cc)) continue;
 
         vect_push(targets, ((RDArgTarget){
-                               .address = rd_function_get_address(f),
-                               .tdef = f->type_def,
-                               .cc = cc,
+                               .address = *addr,
+                               .type_def = tdef,
+                               .callconv = cc,
                            }));
     }
+
+    vect_destroy(&functions);
 
     // (2) direct indirect: prototype attached to nothing, resolve the
     //     named address instead
@@ -154,13 +160,13 @@ static void _rd_discover_collect_targets(RDContext* ctx,
 
         // (1) already covers this:
         //     a function at this exact address already carries the prototype.
-        const RDFunction* f = rd_i_get_function(ctx, address);
-        if(f && f->type_def == tdef) continue;
+        const RDTypeDef* func_tdef = rd_function_get_type_def(ctx, address);
+        if(!func_tdef || func_tdef == tdef) continue;
 
         vect_push(targets, ((RDArgTarget){
                                .address = address,
-                               .tdef = tdef,
-                               .cc = cc,
+                               .type_def = tdef,
+                               .callconv = cc,
                            }));
     }
 }
@@ -183,8 +189,8 @@ void rd_i_discover_args(RDContext* ctx) {
             if(!rd_decode(ctx, r->address, &instr)) continue;
             if(!rd_instr_is_call(&instr)) continue;
 
-            _rd_discover_call_args(ctx, t->tdef, r->address, t->cc, &il,
-                                   &fmt_buf);
+            _rd_discover_call_args(ctx, t->type_def, r->address, t->callconv,
+                                   &il, &fmt_buf);
         }
     }
 

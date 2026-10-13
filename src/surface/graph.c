@@ -2,7 +2,6 @@
 #include "core/context.h"
 #include "io/flagsbuffer.h"
 #include "support/containers.h"
-#include "support/error.h"
 #include "surface/items.h"
 #include "surface/renderer.h"
 #include "surface/state.h"
@@ -12,6 +11,7 @@
 typedef struct RDSurfaceGraph {
     RDRenderer* renderer;
     RDSurfaceState state;
+    RDFunctionGraph* graph;
 } RDSurfaceGraph;
 
 static void _rd_surfacegraph_render_finalize(RDSurfaceGraph* self) {
@@ -33,15 +33,35 @@ static void _rd_surfacegraph_render_finalize(RDSurfaceGraph* self) {
     rd_i_renderer_swap(self->renderer);
 }
 
+static bool _rd_surfacegraph_sync(RDSurfaceGraph* self) {
+    RDAddress entry = rd_i_abs(self->renderer->context, self->state.start);
+
+    RDAddress graph_entry;
+
+    if(rd_functiongraph_is_current(self->graph) &&
+       rd_functiongraph_get_address(self->graph, &graph_entry) &&
+       graph_entry == entry)
+        return true;
+
+    return rd_functiongraph_populate(self->graph, entry);
+}
+
 RDSurfaceGraph* rd_surfacegraph_create(RDContext* ctx, RDRenderFlags flags) {
     RDSurfaceGraph* self = rd_alloc(sizeof(*self));
-    *self = (RDSurfaceGraph){.renderer = rd_i_renderer_create(ctx, flags)};
+
+    *self = (RDSurfaceGraph){
+        .renderer = rd_i_renderer_create(ctx, flags),
+        .graph = rd_functiongraph_create(ctx),
+    };
+
     return self;
 }
 
 void rd_surfacegraph_destroy(RDSurfaceGraph* self) {
     if(!self) return;
+
     rd_i_surfacestate_deinit(&self->state);
+    rd_functiongraph_destroy(self->graph);
     rd_i_renderer_destroy(self->renderer);
     rd_free(self);
 }
@@ -60,7 +80,11 @@ static void _rd_surfacegraph_render_range(RDSurfaceGraph* self, RDAddress start,
     RDContext* ctx = r->context;
 
     const RDSegment* seg = rd_i_db_find_segment(ctx, start);
-    panic_if(!seg, "chunk start outside any segment @ %" PRIX64, start);
+
+    if(!seg) {
+        RD_LOG_FAIL("chunk start outside any segment @ %" PRIX64, start);
+        return;
+    }
 
     // 'endidx' is calculated manually because it can trigger
     // rd_i_address2index's assertion if it is EXACTLY at end
@@ -91,44 +115,48 @@ static void _rd_surfacegraph_render_range(RDSurfaceGraph* self, RDAddress start,
 void rd_surfacegraph_render(RDSurfaceGraph* self) {
     rd_i_renderer_clear(self->renderer);
 
-    const RDFunction* f = rd_surfacegraph_get_function(self);
-    if(!f || !f->graph) return;
+    if(!_rd_surfacegraph_sync(self)) {
+        // front must become EMPTY, not stale
+        rd_i_renderer_swap(self->renderer);
+        return;
+    }
 
-    const RDNodeVect* nodes = rd_i_graph_get_nodes_ordered(f->graph);
-
-    RDFunctionChunkVect chunks = {0};
-    vect_reserve(&chunks, vect_length(nodes));
+    const RDNodeVect* nodes =
+        rd_i_graph_get_nodes_ordered((const RDGraph*)self->graph);
 
     const RDGraphNode* n;
     vect_each(n, nodes) {
-        RDFunctionChunk* chunk = rd_i_function_get_chunk(f, *n);
-        assert(chunk && "node without chunk");
-        vect_push(&chunks, chunk);
-    }
+        RDAddress start, end;
 
-    rd_i_functionchunk_sort(&chunks);
+        if(!rd_functiongraph_get_chunk_start(self->graph, *n, &start) ||
+           !rd_functiongraph_get_chunk_end(self->graph, *n, &end))
+            continue;
 
-    RDFunctionChunk** chunk;
-    vect_each(chunk, &chunks) {
-        RDAddress start = rd_i_abs(self->renderer->context, (*chunk)->start);
-        RDAddress end = rd_i_abs(self->renderer->context, (*chunk)->end);
         _rd_surfacegraph_render_range(self, start, end);
     }
 
-    vect_destroy(&chunks);
     _rd_surfacegraph_render_finalize(self);
 }
 
 bool rd_surfacegraph_jump_to(RDSurfaceGraph* self, RDAddress address) {
     RDContext* ctx = self->renderer->context;
-    const RDFunction* f = rd_i_find_function(ctx, address);
-    if(!f) return false;
 
-    if(f->rel_address != self->state.start) {
-        rd_i_surfacestate_push_history(&self->state, &self->state.back_history,
-                                       ctx);
+    RDAddress shown;
+    bool has_shown = rd_functiongraph_get_address(self->graph, &shown);
+
+    RDAddress entry;
+    if(!rd_function_find(ctx, address, &entry)) return false;
+
+    RDRelAddress rel = rd_i_rel(ctx, entry);
+
+    if(rel != self->state.start) {
+        if(has_shown) {
+            rd_i_surfacestate_push_history(&self->state,
+                                           &self->state.back_history, ctx);
+        }
+
         vect_clear(&self->state.fwd_history);
-        self->state.start = f->rel_address; // the anchor IS the entry address
+        self->state.start = rel; // the anchor IS the entry address
     }
 
     // render then set pos: rows_front must be populated first
@@ -161,6 +189,7 @@ bool rd_surfacegraph_select_word(RDSurfaceGraph* self, int row, int col) {
 bool rd_surfacegraph_go_back(RDSurfaceGraph* self) {
     if(!rd_i_surfacestate_go_back(&self->state, self->renderer->context))
         return false;
+
     rd_surfacegraph_render(self);
     return true;
 }
@@ -168,6 +197,7 @@ bool rd_surfacegraph_go_back(RDSurfaceGraph* self) {
 bool rd_surfacegraph_go_forward(RDSurfaceGraph* self) {
     if(!rd_i_surfacestate_go_forward(&self->state, self->renderer->context))
         return false;
+
     rd_surfacegraph_render(self);
     return true;
 }
@@ -297,12 +327,11 @@ void rd_surfacegraph_set_highlight_word(RDSurfaceGraph* self,
     rd_i_renderer_set_highlight_word(self->renderer, word);
 }
 
-const RDFunction* rd_surfacegraph_get_function(const RDSurfaceGraph* self) {
-    const RDContext* ctx = self->renderer->context;
-    return rd_i_find_function(ctx, rd_i_abs(ctx, self->state.start));
+bool rd_surfacegraph_get_function_address(const RDSurfaceGraph* self,
+                                          RDAddress* address) {
+    return rd_functiongraph_get_address(self->graph, address);
 }
 
-RDGraph* rd_surfacegraph_get_graph(const RDSurfaceGraph* self) {
-    const RDFunction* f = rd_surfacegraph_get_function(self);
-    return f ? f->graph : NULL;
+RDFunctionGraph* rd_surfacegraph_get_graph(const RDSurfaceGraph* self) {
+    return self->graph;
 }

@@ -132,15 +132,11 @@ void rd_i_db_save(RDContext* ctx) {
     // clang-format off
     sqlite3_exec(ctx->db->handle, "DELETE FROM CallConvs", NULL, NULL, NULL);
     sqlite3_exec(ctx->db->handle, "DELETE FROM CallConvRegs", NULL, NULL, NULL);
-    sqlite3_exec(ctx->db->handle, "DELETE FROM Functions", NULL, NULL, NULL);
     sqlite3_exec(ctx->db->handle, "DELETE FROM SegmentRegisters", NULL, NULL, NULL);
     // clang-format on
 
     RDCallConv** cc;
     vect_each(cc, &ctx->callconvs) _rd_i_db_query_set_callconv(ctx, *cc);
-
-    RDFunction** f;
-    vect_each(f, &ctx->functions) _rd_i_db_query_set_function(ctx, *f);
 
     RDSegmentRegVect* sreg_vect;
     vect_each(sreg_vect, &ctx->db->segment_regs) {
@@ -159,7 +155,6 @@ void rd_i_db_load(RDContext* ctx) {
     RDTypeDef** it;
     vect_each(it, &ctx->typedefs) { rd_i_typedef_measure(ctx, *it); }
 
-    _rd_i_db_query_load_all_functions(ctx);
     _rd_i_db_query_load_all_sregval(ctx);
 }
 
@@ -443,8 +438,25 @@ bool rd_i_db_del_type(RDContext* ctx, RDAddress address) {
     return _rd_i_db_query_del_type(ctx, address);
 }
 
-void rd_i_db_set_function(RDContext* ctx, const RDFunction* f) {
-    _rd_i_db_query_set_function(ctx, f);
+void rd_i_db_set_function(RDContext* ctx, RDAddress address, const char* type) {
+    _rd_i_db_query_set_function(ctx, address, type);
+}
+
+void rd_i_db_del_function(RDContext* ctx, RDAddress address) {
+    _rd_i_db_query_del_function(ctx, address);
+}
+
+bool rd_i_db_get_function_type(RDContext* ctx, RDAddress address,
+                               const char** type) {
+    return _rd_i_db_query_get_function_type(ctx, address, type);
+}
+
+RDAddressVect* rd_i_db_get_all_functions(RDContext* ctx, RDAddressVect* v) {
+    return _rd_i_db_query_get_all_functions(ctx, v);
+}
+
+usize rd_i_db_get_function_count(RDContext* ctx) {
+    return _rd_i_db_query_get_function_count(ctx);
 }
 
 RDAddressVect* rd_i_db_get_all_address_by_type(RDContext* ctx, RDAddressVect* v,

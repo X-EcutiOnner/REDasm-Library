@@ -20,7 +20,6 @@ typedef struct RDSymbol {
 
     union {
         const RDSegment* segment;
-        const RDFunction* func;
         RDType type;
     };
 } RDSymbol;

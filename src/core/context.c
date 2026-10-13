@@ -375,37 +375,6 @@ const RDSegment* rd_find_segment(const RDContext* self, RDAddress addr) {
     return rd_i_db_find_segment(self, addr);
 }
 
-RDFunction* rd_i_find_function(const RDContext* self, RDAddress address) {
-    if(!rd_is_address(self, address)) return NULL;
-
-    const RDFunctionChunkVect* chunks = &self->functions.chunks;
-    if(vect_is_empty(chunks)) return NULL;
-
-    RDRelAddress rel_address = rd_i_rel(self, address);
-
-    usize idx =
-        vect_bsearch(chunks, &rel_address, rd_i_functionchunk_kcmp_pred);
-    if(idx == vect_length(chunks)) return NULL;
-
-    const RDFunctionChunk* chunk = *vect_at(chunks, idx);
-    return (RDFunction*)chunk->func;
-}
-
-RDFunction* rd_i_get_function(const RDContext* self, RDAddress address) {
-    if(!rd_is_address(self, address)) return NULL;
-
-    RDRelAddress rel_address = rd_i_rel(self, address);
-
-    usize idx =
-        vect_bsearch(&self->functions, &rel_address, rd_i_function_kcmp_pred);
-    if(idx == vect_length(&self->functions)) return NULL;
-    return *vect_at(&self->functions, idx);
-}
-
-const RDFunction* rd_find_function(const RDContext* self, RDAddress address) {
-    return rd_i_find_function(self, address);
-}
-
 bool rd_to_offset(const RDContext* self, RDAddress address, RDOffset* offset) {
     const RDInputMappingVect* mappings = rd_i_db_get_mappings(self);
 
@@ -446,6 +415,12 @@ bool rd_is_address(const RDContext* self, RDAddress address) {
 
 bool rd_is_offset(const RDContext* self, RDOffset offset) {
     return rd_i_db_find_mapping(self, offset) != NULL;
+}
+
+bool rd_is_function(const RDContext* self, RDAddress address) {
+    const RDSegment* seg = rd_i_db_find_segment(self, address);
+    return seg && rd_flagsbuffer_has_func(seg->flags,
+                                          rd_i_address2index(seg, address));
 }
 
 bool rd_has_refs_from(const RDContext* self, RDAddress address) {
@@ -723,13 +698,12 @@ void rd_destroy(RDContext* self) {
     vect_destroy(&self->sym_buf);
     vect_destroy(&self->str_buf);
     vect_destroy(&self->seg_buf);
-    vect_destroy(&self->imp_buf);
     vect_destroy(&self->autoname_buf);
     vect_destroy(&self->nameaddr_buf);
     vect_destroy(&self->name_buf);
     vect_destroy(&self->ovr_ops_buf);
-    vect_destroy(&self->tdef_buf);
     vect_destroy(&self->type_buf);
+    vect_destroy(&self->functions_buf);
     vect_destroy(&self->addr_type_buf);
     vect_destroy(&self->symbols_buf);
     vect_destroy(&self->pending_renames);
@@ -738,14 +712,13 @@ void rd_destroy(RDContext* self) {
     vect_destroy(&self->xrefs_from);
     vect_destroy(&self->lift_buf);
     vect_destroy(&self->resolve_buf);
-    vect_destroy(&self->chunk_buf);
     vect_destroy(&self->problems_buf);
     vect_destroy(&self->externals);
+    vect_destroy(&self->chunks);
     vect_destroy(&self->string_terminators);
     vect_destroy(&self->hooks);
     hmap_destroy(&self->engine.current.registers);
     rd_i_analyzeritemvect_destroy(&self->analyzerplugins);
-    rd_i_functionvect_destroy(&self->functions);
     rd_i_engine_destroy(self);
     rd_i_kb_destroy(self->kb);
     rd_i_db_destroy(self->db);
@@ -1075,11 +1048,11 @@ RDAddressSlice rd_get_all_address_by_type(const RDContext* self,
             (RDContext*)self, (RDAddressVect*)&self->addr_type_buf, filter));
 }
 
-RDFunctionSlice rd_get_all_functions(const RDContext* self) {
-    return (RDFunctionSlice){
-        .data = (const RDFunction**)self->functions.data,
-        .length = self->functions.length,
-    };
+RDAddressSlice rd_get_all_functions(const RDContext* self) {
+    const RDAddressVect* functions = rd_i_db_get_all_functions(
+        (RDContext*)self, (RDAddressVect*)&self->functions_buf);
+
+    return vect_to_slice(RDAddressSlice, functions);
 }
 
 RDExternalSlice rd_get_all_externals(const RDContext* self,
@@ -1092,15 +1065,17 @@ RDExternalSlice rd_get_all_externals(const RDContext* self,
 RDSymbolSlice rd_get_all_symbols(const RDContext* self) {
     RDContext* ctx = (RDContext*)self;
     const RDSegmentVect* segments = rd_i_db_get_segments(ctx);
-    const RDFunctionVect* functions = &ctx->functions;
 
     RDAddressVect addresses = {0};
     RDTypeVect types = {0};
     rd_i_db_get_all_types(ctx, &addresses, &types);
 
+    RDAddressVect functions = {0};
+    rd_i_db_get_all_functions(ctx, &functions);
+
     vect_clear(&ctx->symbols_buf);
     vect_reserve(&ctx->symbols_buf, vect_length(segments) +
-                                        vect_length(functions) +
+                                        vect_length(&functions) +
                                         vect_length(&addresses));
 
     RDSegment** seg;
@@ -1112,14 +1087,12 @@ RDSymbolSlice rd_get_all_symbols(const RDContext* self) {
                                      });
     }
 
-    RDFunction** func;
-    vect_each(func, functions) {
-        vect_push(&ctx->symbols_buf,
-                  (RDSymbol){
-                      .kind = RD_SYMBOL_FUNCTION,
-                      .address = rd_function_get_address(*func),
-                      .func = *func,
-                  });
+    const RDAddress* addr;
+    vect_each(addr, &functions) {
+        vect_push(&ctx->symbols_buf, (RDSymbol){
+                                         .kind = RD_SYMBOL_FUNCTION,
+                                         .address = *addr,
+                                     });
     }
 
     for(usize i = 0; i < vect_length(&addresses); i++) {
@@ -1151,6 +1124,7 @@ RDSymbolSlice rd_get_all_symbols(const RDContext* self) {
                                      });
     }
 
+    vect_destroy(&functions);
     vect_destroy(&types);
     vect_destroy(&addresses);
 

@@ -57,7 +57,7 @@ typedef struct RDProcessorPlugin {
     bool (*query_reg)(RDQueryReg*, RDProcessor*);
 
     void (*render_segment)(RDRenderer*, const RDSegment*, RDProcessor*);
-    void (*render_function)(RDRenderer*, const RDFunction*, RDProcessor*);
+    void (*render_function)(RDRenderer*, RDAddress, RDProcessor*);
     bool (*render_mnemonic)(RDRenderer*, const RDInstruction*, RDProcessor*);
     bool (*render_operand)(RDRenderer*, const RDInstruction*, int, RDProcessor*);
 } RDProcessorPlugin;

@@ -2,7 +2,7 @@
 
 #include <redasm/common.h>
 #include <redasm/config.h>
-#include <redasm/graph/graph.h>
+#include <redasm/graphing/graph.h>
 
 typedef struct RDCallGraph RDCallGraph;
 

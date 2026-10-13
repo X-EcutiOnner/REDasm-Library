@@ -1,8 +1,9 @@
 #include "callgraph.h"
 #include "core/context.h"
+#include "function/function.h"
 #include "io/flagsbuffer.h"
 #include <redasm/allocator.h>
-#include <redasm/graph/graph.h>
+#include <redasm/graphing/graph.h>
 
 typedef struct RDCallGraphNode {
     RDRelAddress func_rel_address;
@@ -22,6 +23,7 @@ static void _rd_callgraph_destroy(RDGraph* base) {
         rd_free(d);
     }
 
+    vect_destroy(&self->chunks_buf);
     vect_destroy(&self->xrefs_buf);
     vect_destroy(&self->wl);
 }
@@ -61,11 +63,11 @@ static void _rd_callgraph_enqueue(RDCallGraph* self, RDGraphNode n, bool up) {
 }
 
 static void _rd_callgraph_explore_up(RDCallGraph* self, RDGraphNode child_node,
-                                     const RDFunction* f) {
-    RDContext* ctx = self->context;
+                                     RDRelAddress rel_entry) {
+    RDContext* ctx = self->base.context;
 
     const RDXRefVect* xrefs = rd_i_db_get_xrefs_to(
-        ctx, rd_i_abs(ctx, f->rel_address), RD_XR_NONE, &self->xrefs_buf);
+        ctx, rd_i_abs(ctx, rel_entry), RD_XR_NONE, &self->xrefs_buf);
 
     const RDXRef* xref;
     vect_each(xref, xrefs) {
@@ -75,15 +77,18 @@ static void _rd_callgraph_explore_up(RDCallGraph* self, RDGraphNode child_node,
         // cell for indirect references.
         // Key by the containing function so several calls from one caller
         // collapse into a single node.
-        const RDFunction* src = rd_i_find_function(ctx, xref->address);
-        if(!src && direct)
+
+        RDRelAddress src_rel_entry;
+        bool has_src =
+            rd_i_function_find_rel(ctx, xref->address, &src_rel_entry);
+        if(!has_src && direct)
             continue; // call site not (yet) claimed by a function
 
         RDRelAddress key =
-            src ? src->rel_address : rd_i_rel(ctx, xref->address);
+            has_src ? src_rel_entry : rd_i_rel(ctx, xref->address);
 
         // a jump back to our own entry (a loop) isn't a reference to us
-        if(!direct && key == f->rel_address) continue;
+        if(!direct && key == rel_entry) continue;
 
         RDGraphNode n = _rd_callgraph_get_or_add_block(self, key);
 
@@ -100,21 +105,19 @@ static void _rd_callgraph_explore_up(RDCallGraph* self, RDGraphNode child_node,
 
 static void _rd_callgraph_explore_down(RDCallGraph* self,
                                        RDGraphNode parent_node,
-                                       const RDFunction* f) {
-    const RDNodeVect* nodes = rd_i_graph_get_nodes_ordered(f->graph);
-    RDContext* ctx = self->context;
+                                       RDRelAddress rel_entry) {
+    RDContext* ctx = self->base.context;
 
-    const RDGraphNode* it;
-    vect_each(it, nodes) {
-        const RDFunctionChunk* b =
-            (const RDFunctionChunk*)rd_graph_get_data(f->graph, *it);
+    rd_i_chunks_collect(ctx, rd_i_abs(ctx, rel_entry), &self->chunks_buf);
 
+    const RDChunk* c;
+    vect_each(c, &self->chunks_buf) {
         const RDSegment* seg =
-            rd_i_db_find_segment(ctx, rd_i_abs(ctx, b->start));
+            rd_i_db_find_segment(ctx, rd_i_abs(ctx, c->start));
         if(!seg) continue;
 
-        usize idx = b->start - seg->rel_start,
-              end_idx = b->end - seg->rel_start;
+        usize idx = c->start - seg->rel_start,
+              end_idx = c->end - seg->rel_start;
 
         while(idx < end_idx) {
             if(rd_flagsbuffer_has_call(seg->flags, idx)) {
@@ -147,7 +150,7 @@ static void _rd_callgraph_explore_down(RDCallGraph* self,
 }
 
 static void _rd_callgraph_walk_up(RDCallGraph* self, RDGraphNode start) {
-    RDContext* ctx = self->context;
+    RDContext* ctx = self->base.context;
     vect_push(&self->wl, start);
 
     while(!vect_is_empty(&self->wl)) {
@@ -156,15 +159,12 @@ static void _rd_callgraph_walk_up(RDCallGraph* self, RDGraphNode start) {
         RDCallGraphNode* d =
             (RDCallGraphNode*)rd_graph_get_data(&self->base, n);
 
-        const RDFunction* f =
-            rd_i_get_function(ctx, rd_i_abs(ctx, d->func_rel_address));
-
-        if(f) _rd_callgraph_explore_up(self, n, f);
+        if(rd_is_function(ctx, rd_i_abs(ctx, d->func_rel_address)))
+            _rd_callgraph_explore_up(self, n, d->func_rel_address);
     }
 }
 
 static void _rd_callgraph_walk_down(RDCallGraph* self, RDGraphNode start) {
-    RDContext* ctx = self->context;
     vect_push(&self->wl, start);
 
     while(!vect_is_empty(&self->wl)) {
@@ -173,21 +173,18 @@ static void _rd_callgraph_walk_down(RDCallGraph* self, RDGraphNode start) {
         RDCallGraphNode* d =
             (RDCallGraphNode*)rd_graph_get_data(&self->base, n);
 
-        const RDFunction* f =
-            rd_i_get_function(ctx, rd_i_abs(ctx, d->func_rel_address));
-
-        if(f && f->graph) _rd_callgraph_explore_down(self, n, f);
+        _rd_callgraph_explore_down(self, n, d->func_rel_address);
     }
 }
 
 RDCallGraph* rd_callgraph_create(RDContext* ctx, RDAddress address) {
-    const RDFunction* f = rd_i_find_function(ctx, address);
-    if(!f || !f->graph) return NULL;
+    RDRelAddress rel_entry;
+    if(!rd_i_function_find_rel(ctx, address, &rel_entry)) return NULL;
 
-    RDCallGraph* self = rd_graph_create_as(RDCallGraph, _rd_callgraph_destroy);
-    self->context = ctx;
+    RDCallGraph* self =
+        rd_graph_create_as(RDCallGraph, ctx, _rd_callgraph_destroy);
 
-    RDGraphNode root = _rd_callgraph_get_or_add_block(self, f->rel_address);
+    RDGraphNode root = _rd_callgraph_get_or_add_block(self, rel_entry);
     rd_graph_set_root(&self->base, root);
     _rd_callgraph_walk_down(self, root);
     _rd_callgraph_walk_up(self, root);
@@ -201,5 +198,5 @@ void rd_callgraph_destroy(RDCallGraph* self) {
 RDAddress rd_callgraph_get_address(const RDCallGraph* self, RDGraphNode n) {
     const RDCallGraphNode* d =
         (const RDCallGraphNode*)rd_graph_get_data(&self->base, n);
-    return rd_i_abs(self->context, d->func_rel_address);
+    return rd_i_abs(self->base.context, d->func_rel_address);
 }

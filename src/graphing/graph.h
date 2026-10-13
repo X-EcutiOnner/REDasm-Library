@@ -1,7 +1,7 @@
 #pragma once
 
 #include "support/utils.h"
-#include <redasm/graph/graph.h>
+#include <redasm/graphing/graph.h>
 
 typedef struct RDNodeVect {
     RDGraphNode* data;
@@ -36,7 +36,9 @@ typedef struct RDEdgeAttributes {
 } RDEdgeAttributes;
 
 typedef struct RDGraph {
+    RDContext* context;
     u32 gen;
+
     RDGraphDestroy destroy;
 
     bool is_ordered;

@@ -12,7 +12,6 @@ typedef enum {
     RD_HOOK_ADDRESS,
     RD_HOOK_STR,
     RD_HOOK_XREF,
-    RD_HOOK_FUNC,
     RD_HOOK_RENDER_MNEMONIC,
     RD_HOOK_RENDER_OPERAND,
 } RDHookKind;
@@ -28,7 +27,6 @@ typedef struct RDHookEvent {
         struct { RDAddress address; } addr;
         struct { RDAddress address; const char* s; usize n; } str;
         struct { RDAddress from, to; RDXRefType type; } xref;
-        struct { RDAddress address; const RDFunction* f; usize index; } func;
         struct { RDRenderer* renderer; const RDInstruction* instr; } render_mnemonic;
         struct { RDRenderer* renderer; const RDInstruction* instr; usize idx; } render_operand;
     };
@@ -49,8 +47,6 @@ RD_API void rd_fire_address_hook(RDContext* ctx, const char* name,
                                  RDAddress addr);
 RD_API void rd_fire_str_hook(RDContext* ctx, const char* name, RDAddress addr,
                              const char* str, usize n);
-RD_API void rd_fire_func_hook(RDContext* ctx, const char* name,
-                              const RDFunction* f, usize index);
 RD_API void rd_fire_xref_hook(RDContext* ctx, const char* name, RDAddress from,
                               RDAddress to, RDXRefType type);
 RD_API bool rd_fire_render_mnemonic_hook(RDContext*, const char* name,

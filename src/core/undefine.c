@@ -2,6 +2,7 @@
 #include "core/context.h"
 #include "db/db.h"
 #include "db/types.h"
+#include "function/function.h"
 #include "io/flagsbuffer.h"
 #include "support/containers.h"
 #include "support/error.h"

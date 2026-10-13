@@ -306,18 +306,17 @@ static void _rd_render_function_row(RDRenderer* r, const RDSegment* seg,
     const RDProcessorPlugin* p = r->context->processorplugin;
     RDAddress address = rd_i_renderer_new_row(r, seg, idx, sub_line, indent);
 
-    // RDFunction may be NULL (eg. during intermediate state analysis)
-    const RDFunction* f = rd_i_find_function(r->context, address);
-
-    if(f && p->render_function) {
-        p->render_function(r, f, r->context->processor);
+    if(p->render_function) {
+        p->render_function(r, address, r->context->processor);
         return;
     }
 
     _rd_render_modifiers(r, seg, idx, RD_THEME_FUNCTION, RD_THEME_BACKGROUND);
 
-    if(f) {
-        const RDFunctionType* f_type = &f->type_def->func_;
+    const RDTypeDef* tdef = rd_function_get_type_def(r->context, address);
+
+    if(tdef) {
+        const RDFunctionType* f_type = &tdef->func_;
 
         if(f_type->ret.has_value) {
             rd_renderer_text(r,
@@ -326,13 +325,13 @@ static void _rd_render_function_row(RDRenderer* r, const RDSegment* seg,
             rd_renderer_ws(r, 1);
         }
 
-        if(rd_function_is_noret(f)) {
+        if(rd_function_is_noret(r->context, address)) {
             rd_renderer_text(r, "noreturn ", RD_THEME_FUNCTION,
                              RD_THEME_BACKGROUND);
         }
     }
 
-    if(!f || (f->type_def->flags & RD_TFLAGS_BUILTIN)) {
+    if(!tdef || (tdef->flags & RD_TFLAGS_BUILTIN)) {
         rd_renderer_text(r, "function ", RD_THEME_FUNCTION,
                          RD_THEME_BACKGROUND);
     }
@@ -342,8 +341,8 @@ static void _rd_render_function_row(RDRenderer* r, const RDSegment* seg,
     assert(hasname);
     rd_renderer_text(r, n.value, RD_THEME_FUNCTION, RD_THEME_BACKGROUND);
 
-    if(f) {
-        const RDFunctionType* f_type = &f->type_def->func_;
+    if(tdef) {
+        const RDFunctionType* f_type = &tdef->func_;
 
         if(f_type->args.has_value) {
             rd_renderer_text(r, "(", RD_THEME_FUNCTION, RD_THEME_BACKGROUND);

@@ -2,7 +2,7 @@
 #include "support/containers.h"
 #include <assert.h>
 #include <redasm/allocator.h>
-#include <redasm/graph/layout.h>
+#include <redasm/graphing/layout.h>
 #include <string.h>
 
 // ---------------------------------------------------------------------------

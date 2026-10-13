@@ -1,13 +1,14 @@
 #pragma once
 
 #include "db/types.h"
+#include "function/chunk.h"
 #include "graphing/graph.h"
 #include <redasm/callgraph.h>
 
 typedef struct RDCallGraph {
     RDGraph base;
-    RDContext* context;
     RDXRefVect xrefs_buf;
+    RDChunkVect chunks_buf;
 
     struct {
         RDGraphNode* data;

@@ -1,16 +1,19 @@
 #pragma once
 
 #include "core/registers.h"
-#include "function/function.h"
 #include "plugins/processor/processor.h"
 #include <redasm/rdil/rdil.h>
 
 typedef struct RDIL {
     RDContext* context;
-    const RDFunction* function;
     RDRegisterHMap registers;
     RDInstructionVect lifted;
-    RDAddress current_address;
+    RDRelAddress current_address;
+
+    struct {
+        RDRelAddress value;
+        bool has_value;
+    } entry;
 
     struct {
         RDAddress value;

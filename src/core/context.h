@@ -5,6 +5,7 @@
 #include "core/segment.h"
 #include "core/symbol.h"
 #include "db/db.h"
+#include "function/chunk.h"
 #include "hooks.h"
 #include "io/buffer.h"
 #include "kb/kb.h"
@@ -60,21 +61,19 @@ typedef struct RDContext {
     RDCharVect name_buf;
     RDCharVect str_buf;
     RDCharVect sym_buf;
-    RDCharVect imp_buf;
     RDCharVect problem_buf;
-    RDCharVect tdef_buf;
     RDCharVect type_buf;
     RDCharVect seg_buf;
+    RDAddressVect functions_buf;
     RDAddressVect addr_type_buf;
-    RDFunctionChunkVect chunk_buf;
     RDOvrOperandVect ovr_ops_buf;
     RDInstructionVect lift_buf;
     RDResolveResultVect resolve_buf;
     RDProblemsVect problems_buf;
     RDSymbolVect symbols_buf;
 
-    u32 func_gen;
     u32 graph_gen;
+    u32 chunk_gen;
 
     char* working_dir;
     char* file_name;
@@ -90,7 +89,7 @@ typedef struct RDContext {
 
     RDDB* db;
     RDKB* kb;
-    RDFunctionVect functions;
+    RDChunkVect chunks;
     RDExternalVect externals;
     RDHookItemVect hooks;
 
@@ -168,9 +167,6 @@ const RDXRefVect* rd_i_get_xrefs_from_ex(RDContext* self, RDAddress fromaddr,
                                          RDXRefType type, RDXRefVect* r);
 const RDXRefVect* rd_i_get_xrefs_to_ex(RDContext* self, RDAddress toaddr,
                                        RDXRefType type, RDXRefVect* r);
-
-RDFunction* rd_i_find_function(const RDContext* self, RDAddress address);
-RDFunction* rd_i_get_function(const RDContext* self, RDAddress address);
 
 bool rd_i_set_noret(RDContext* self, RDAddress address);
 

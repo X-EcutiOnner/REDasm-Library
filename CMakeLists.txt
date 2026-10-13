@@ -41,6 +41,7 @@ target_sources(${PROJECT_NAME}
         src/db/schema.c
         src/function/chunk.c
         src/function/function.c
+        src/function/graph.c
         src/graphing/ego.c
         src/graphing/graph.c
         src/graphing/layered.c

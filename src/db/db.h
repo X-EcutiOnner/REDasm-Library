@@ -81,7 +81,13 @@ bool rd_i_db_get_type(RDContext* ctx, RDAddress address, RDType* t);
 bool rd_i_db_get_root_type(RDContext* ctx, RDAddress* address, RDType* t);
 bool rd_i_db_del_type(RDContext* ctx, RDAddress address);
 
-void rd_i_db_set_function(RDContext* ctx, const RDFunction* f);
+void rd_i_db_set_function(RDContext* ctx, RDAddress address,
+                          const char* type_name);
+void rd_i_db_del_function(RDContext* ctx, RDAddress address);
+bool rd_i_db_get_function_type(RDContext* ctx, RDAddress address,
+                               const char** type_name);
+RDAddressVect* rd_i_db_get_all_functions(RDContext* ctx, RDAddressVect* v);
+usize rd_i_db_get_function_count(RDContext* ctx);
 
 RDAddressVect* rd_i_db_get_all_address_by_type(RDContext* ctx, RDAddressVect* v,
                                                const char* filter);

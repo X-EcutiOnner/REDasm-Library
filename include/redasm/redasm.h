@@ -5,8 +5,9 @@
 #include <redasm/callgraph.h>
 #include <redasm/context.h>
 #include <redasm/function/function.h>
-#include <redasm/graph/graph.h>
-#include <redasm/graph/layout.h>
+#include <redasm/function/graph.h>
+#include <redasm/graphing/graph.h>
+#include <redasm/graphing/layout.h>
 #include <redasm/hooks.h>
 #include <redasm/io/buffer.h>
 #include <redasm/io/flags.h>

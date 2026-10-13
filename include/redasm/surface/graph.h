@@ -1,7 +1,7 @@
 #pragma once
 
 #include <redasm/common.h>
-#include <redasm/function/function.h>
+#include <redasm/function/graph.h>
 #include <redasm/surface/common.h>
 
 typedef struct RDSurfaceGraph RDSurfaceGraph;
@@ -38,6 +38,6 @@ RD_API RDSurfacePos rd_surfacegraph_get_pos(const RDSurfaceGraph* self);
 RD_API RDRowSlice rd_surfacegraph_get_row(const RDSurfaceGraph* self, usize idx);
 RD_API const char* rd_surfacegraph_get_selected_text(RDSurfaceGraph* self);
 RD_API const char* rd_surfacegraph_get_word_under_pos(const RDSurfaceGraph* self, const RDSurfacePos* pos);
-RD_API const RDFunction* rd_surfacegraph_get_function(const RDSurfaceGraph* self);
-RD_API RDGraph* rd_surfacegraph_get_graph(const RDSurfaceGraph* self);
+RD_API bool rd_surfacegraph_get_function_address(const RDSurfaceGraph* self, RDAddress* address);
+RD_API RDFunctionGraph* rd_surfacegraph_get_graph(const RDSurfaceGraph* self);
 // clang-format on

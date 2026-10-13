@@ -3,7 +3,6 @@
 #include "core/callconv.h"
 #include "core/segment.h"
 #include "db/types.h"
-#include "function/function.h"
 #include "types/def.h"
 #include <redasm/context.h>
 
@@ -49,7 +48,10 @@ enum {
     RD_QUERY_GET_ROOT_TYPE,
 
     RD_QUERY_SET_FUNCTION,
-    RD_QUERY_LOAD_ALL_FUNCTIONS,
+    RD_QUERY_DEL_FUNCTION,
+    RD_QUERY_GET_FUNCTION_TYPE,
+    RD_QUERY_GET_ALL_FUNCTIONS,
+    RD_QUERY_GET_FUNCTION_COUNT,
 
     RD_QUERY_SET_CALLCONV,
     RD_QUERY_GET_ALL_CALLCONVS,
@@ -146,8 +148,14 @@ RDTypeVect* _rd_i_db_query_get_all_types(RDContext* ctx, RDAddressVect* av,
 bool _rd_i_db_query_get_root_type(RDContext* ctx, RDAddress* address,
                                   RDType* t);
 
-void _rd_i_db_query_set_function(RDContext* ctx, const RDFunction* f);
-void _rd_i_db_query_load_all_functions(RDContext* ctx);
+void _rd_i_db_query_set_function(RDContext* ctx, RDAddress address,
+                                 const char* type_name);
+void _rd_i_db_query_del_function(RDContext* ctx, RDAddress address);
+bool _rd_i_db_query_get_function_type(RDContext* ctx, RDAddress address,
+                                      const char** type_name);
+RDAddressVect* _rd_i_db_query_get_all_functions(RDContext* ctx,
+                                                RDAddressVect* v);
+usize _rd_i_db_query_get_function_count(RDContext* ctx);
 
 void _rd_i_db_query_set_callconv(RDContext* ctx, const RDCallConv* cc);
 RDCallConvVect* _rd_i_db_query_get_all_callconvs(RDContext* ctx,

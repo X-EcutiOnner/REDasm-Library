@@ -144,22 +144,6 @@ void rd_fire_str_hook(RDContext* ctx, const char* name, RDAddress addr,
                        });
 }
 
-void rd_fire_func_hook(RDContext* ctx, const char* name, const RDFunction* f,
-                       usize index) {
-    if(!f) return;
-
-    _rd_fire_hook(ctx, &(RDHookEvent){
-                           .kind = RD_HOOK_FUNC,
-                           .name = name,
-                           .func =
-                               {
-                                   .address = rd_i_abs(ctx, f->rel_address),
-                                   .f = f,
-                                   .index = index,
-                               },
-                       });
-}
-
 void rd_fire_xref_hook(RDContext* ctx, const char* name, RDAddress from,
                        RDAddress to, RDXRefType type) {
     _rd_fire_hook(ctx, &(RDHookEvent){

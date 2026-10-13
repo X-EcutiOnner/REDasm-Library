@@ -1,6 +1,7 @@
 #include "engine.h"
 #include "core/context.h"
 #include "core/worker.h"
+#include "function/function.h"
 #include "io/flagsbuffer.h"
 #include "support/containers.h"
 #include "support/error.h"
@@ -381,7 +382,7 @@ bool rd_i_engine_promote_target(RDContext* ctx, const RDSegment* seg, usize idx,
         return false;
 
     switch(kind) {
-        case RD_EI_CALL: return rd_i_function_declare_if(ctx, seg, idx, type);
+        case RD_EI_CALL: return rd_i_function_declare(ctx, seg, idx, type);
 
         case RD_EI_JUMP:
             rd_i_flagsbuffer_set_jmpdst(seg->flags, idx);

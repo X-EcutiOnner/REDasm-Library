@@ -313,17 +313,22 @@ RDAddress rd_i_renderer_new_row(RDRenderer* self, const RDSegment* seg,
     rd_i_rowvect_push(&self->rows_back, sub_line, address);
     rd_i_row_reserve(vect_last(&self->rows_back), RD_SURFACE_ROW_INITIAL_SIZE);
 
-    if(!rd_i_renderer_has_flag(self, RD_RF_NO_ADDRESS)) {
+    if(!rd_i_renderer_has_flag(self, RD_RF_NO_SEGMENT))
         rd_renderer_norm(self, seg->name);
-        rd_renderer_norm(self, ":");
+
+    if(!rd_i_renderer_has_flag(self, RD_RF_NO_ADDRESS)) {
+        if(!rd_i_renderer_has_flag(self, RD_RF_NO_SEGMENT))
+            rd_renderer_norm(self, ":");
 
         const unsigned int PTR_SIZE = rd_get_ptr_size(self->context);
         const char* address_str = rd_i_to_hex((i64)address, PTR_SIZE);
 
         rd_renderer_norm(self, address_str);
-
-        rd_renderer_ws(self, 2);
     }
+
+    if(!rd_i_renderer_has_flag(self, RD_RF_NO_SEGMENT) ||
+       !rd_i_renderer_has_flag(self, RD_RF_NO_ADDRESS))
+        rd_renderer_ws(self, 2);
 
     if(!rd_i_renderer_has_flag(self, RD_RF_NO_INDENT))
         rd_renderer_ws(self, indent);

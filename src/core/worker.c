@@ -5,6 +5,7 @@
 #include "core/engine.h"
 #include "core/stringfinder.h"
 #include "core/undefine.h"
+#include "function/function.h"
 #include "io/flagsbuffer.h"
 #include "plugins/analyzer.h"
 #include "support/containers.h"
@@ -23,17 +24,17 @@ static const char* const RD_STEP_NAMES[] = {
 static_assert(rd_count_of(RD_STEP_NAMES) == RD_WS_COUNT, "step names mismatch");
 
 #if !defined(NDEBUG)
-static void _rd_worker_check_chunk_pair(const RDFunctionChunk* p,
-                                        const RDFunctionChunk* c) {
+static void _rd_worker_check_chunk_pair(const RDContext* ctx, const RDChunk* p,
+                                        const RDChunk* c) {
     if(p->end <= c->start) return;
 
     RD_LOG_FAIL("chunk overlap: func %llx [%llx,%llx) vs func %llx [%llx,%llx)",
-                (unsigned long long)rd_function_get_address(p->func),
-                (unsigned long long)rd_functionchunk_get_start(p),
-                (unsigned long long)rd_functionchunk_get_end(p),
-                (unsigned long long)rd_function_get_address(c->func),
-                (unsigned long long)rd_functionchunk_get_start(c),
-                (unsigned long long)rd_functionchunk_get_end(c));
+                (unsigned long long)rd_i_abs(ctx, p->entry),
+                (unsigned long long)rd_i_abs(ctx, p->start),
+                (unsigned long long)rd_i_abs(ctx, p->end),
+                (unsigned long long)rd_i_abs(ctx, c->entry),
+                (unsigned long long)rd_i_abs(ctx, c->start),
+                (unsigned long long)rd_i_abs(ctx, c->end));
 }
 #endif
 
@@ -44,20 +45,9 @@ static void _rd_worker_next_or_emulate(RDContext* ctx) {
         ctx->engine.step++;
 }
 
-static void _rd_worker_rebuild_functions(RDContext* ctx) {
-    RD_LOG_INFO("generating functions");
-
-    RDFunctionChunkVect chunks = {0};
-    vect_reserve(&chunks, vect_capacity(&ctx->functions.chunks));
-
-    RDFunction** it;
-    vect_each(it, &ctx->functions) {
-        rd_i_function_rebuild_graph(*it, &chunks);
-    }
-
-    rd_i_functionchunk_sort(&chunks);
-    mem_swap(RDFunctionChunkVect, &ctx->functions.chunks, &chunks);
-    rd_i_functionchunk_destroy(&chunks);
+static void _rd_worker_rebuild_chunks(RDContext* ctx) {
+    RD_LOG_INFO("generating chunks");
+    rd_i_chunks_rebuild(ctx);
 }
 
 static void _rd_worker_follow_pointers(RDContext* ctx) {
@@ -102,13 +92,13 @@ static void _rd_worker_apply_function_types(RDContext* ctx) {
         usize idx = rd_i_address2index(seg, address);
 
         if(rd_flagsbuffer_has_func(seg->flags, idx)) {
-            RDFunction* f = rd_i_get_function(ctx, address);
-            if(!f || f->type_def == tdef) continue;
+            const RDTypeDef* func_tdef = rd_function_get_type_def(ctx, address);
 
-            if(f->type_def && !(f->type_def->flags & RD_TFLAGS_BUILTIN))
+            if(!func_tdef || func_tdef == tdef ||
+               (func_tdef->flags & RD_TFLAGS_BUILTIN))
                 continue;
 
-            rd_i_function_set_type_def(f, tdef);
+            rd_i_function_set_type_def(ctx, address, tdef);
         }
         else if(rd_flagsbuffer_has_type(seg->flags, idx)) {
             RDType t;
@@ -125,11 +115,13 @@ static void _rd_worker_apply_function_types(RDContext* ctx) {
 static void _rd_worker_apply_noret(RDContext* ctx) {
     RDXRefVect xrefs = {0};
     RDAddressVect v = {0};
+    RDAddressVect functions = {0};
 
-    RDFunction** func_it;
-    vect_each(func_it, &ctx->functions) {
-        if(!rd_function_is_noret(*func_it)) continue;
-        vect_push(&v, rd_function_get_address(*func_it));
+    rd_i_db_get_all_functions(ctx, &functions); // snapshot
+
+    const RDAddress* fa;
+    vect_each(fa, &functions) {
+        if(rd_function_is_noret(ctx, *fa)) vect_push(&v, *fa);
     }
 
     while(!vect_is_empty(&v)) {
@@ -143,19 +135,21 @@ static void _rd_worker_apply_noret(RDContext* ctx) {
             // stamp FL_NORET on the call site
             if(!rd_i_set_noret(ctx, r->address)) continue;
 
-            // find containing function, rebuild its graph
-            RDFunction* f = rd_i_find_function(ctx, r->address);
-            if(!f) continue;
+            // containing function: copy the entry out, the rebuild below
+            // reallocates ctx->chunks
+            const RDChunk* c = rd_i_chunks_find(ctx, r->address);
+            if(!c) continue;
 
-            rd_i_function_rebuild(f);
+            RDAddress entry = rd_i_abs(ctx, c->entry);
+            rd_i_chunks_rebuild_at(ctx, entry);
 
             // if all exit blocks are now NORET, propagate further
-            if(rd_function_is_noret(f))
-                vect_push(&v, rd_function_get_address(f));
+            if(rd_function_is_noret(ctx, entry)) vect_push(&v, entry);
         }
     }
 
     vect_destroy(&v);
+    vect_destroy(&functions);
     vect_destroy(&xrefs);
 }
 
@@ -306,14 +300,14 @@ static void _rd_worker_step_symbols(RDContext* ctx) {
 
 static void _rd_worker_step_finalize(RDContext* ctx) {
     rd_i_find_strings(ctx);
-    _rd_worker_rebuild_functions(ctx);
+    _rd_worker_rebuild_chunks(ctx);
     _rd_worker_follow_pointers(ctx);
     _rd_worker_apply_noret(ctx);
 
 #if !defined(NDEBUG)
-    for(usize i = 1; i < vect_length(&ctx->functions.chunks); i++) {
-        _rd_worker_check_chunk_pair((*vect_at(&ctx->functions.chunks, i - 1)),
-                                    *vect_at(&ctx->functions.chunks, i));
+    for(usize i = 1; i < vect_length(&ctx->chunks); i++) {
+        _rd_worker_check_chunk_pair(ctx, vect_at(&ctx->chunks, i - 1),
+                                    vect_at(&ctx->chunks, i));
     }
 #endif
 
@@ -322,7 +316,8 @@ static void _rd_worker_step_finalize(RDContext* ctx) {
     ctx->engine.step++;
 
     RD_LOG_INFO("terminated with functions: %zu, problems: %zu",
-                vect_length(&ctx->functions), rd_i_db_get_problem_count(ctx));
+                rd_i_db_get_function_count(ctx),
+                rd_i_db_get_problem_count(ctx));
 }
 
 bool rd_step(RDContext* self, RDWorkerStatus* status) {

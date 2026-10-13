@@ -281,11 +281,10 @@ static void _rd_il_eval(RDIL* self, const RDInstruction* il) {
     }
 }
 
-RDIL* rd_il_create(RDContext* ctx, const RDFunction* f) {
+RDIL* rd_il_create(RDContext* ctx) {
     RDIL* self = rd_alloc(sizeof(*self));
     *self = (RDIL){.context = ctx};
     rd_i_registermap_init(&self->registers);
-    rd_il_assign(self, f);
     return self;
 }
 
@@ -300,16 +299,18 @@ void rd_il_destroy(RDIL* self) {
 void rd_il_flush(RDIL* self) {
     hmap_clear(&self->registers);
     vect_clear(&self->lifted);
-    self->current_address =
-        self->function ? rd_function_get_address(self->function) : 0;
+    self->current_address = self->entry.has_value ? self->entry.value : 0;
     self->done = false;
 }
 
-void rd_il_assign(RDIL* self, const RDFunction* f) {
-    self->function = f;
-    rd_il_flush(self);
+void rd_il_assign(RDIL* self, RDAddress entry) {
+    if(!rd_is_address(self->context, entry)) {
+        optional_unset(&self->entry);
+        return;
+    }
 
-    if(!f) return;
+    optional_set(&self->entry, rd_i_rel(self->context, entry));
+    rd_il_flush(self);
 
     // seed segment registers from DB into local register file
     const RDSegmentRegNameVect* sreg_names =
@@ -319,13 +320,13 @@ void rd_il_assign(RDIL* self, const RDFunction* f) {
     vect_each(it, sreg_names) {
         RDRegValue val;
 
-        if(rd_get_sregval(self->context, rd_function_get_address(f), *it, &val))
+        if(rd_get_sregval(self->context, entry, *it, &val))
             rd_il_set_regval(self, *it, val);
     }
 }
 
 bool rd_il_run(RDIL* self) {
-    if(!self->function) return false;
+    if(!self->entry.has_value) return false;
     if(!self->context->processorplugin->lift) return false;
 
     while(rd_il_step(self))
@@ -335,19 +336,20 @@ bool rd_il_run(RDIL* self) {
 }
 
 bool rd_il_step(RDIL* self) {
-    if(self->done || !self->function) return false;
+    if(self->done || !self->entry.has_value) return false;
 
     self->target.known = false;
 
-    const RDInstructionVect* v =
-        rd_i_il_lift(self->context, self->current_address, &self->lifted);
+    const RDInstructionVect* v = rd_i_il_lift(
+        self->context, rd_i_abs(self->context, self->current_address),
+        &self->lifted);
 
     if(!v) { // decoding failed
         self->done = true;
         return false;
     }
 
-    RDAddress next_address = self->current_address + v->real_instr.length;
+    RDRelAddress next_address = self->current_address + v->real_instr.length;
 
     // this instruction has delay slots:
     // save the address, process delay slots and restore the address
@@ -357,7 +359,8 @@ bool rd_il_step(RDIL* self) {
         const RDSegment* seg =
             rd_i_db_find_segment(self->context, v->real_instr.address);
 
-        if(!seg || !rd_i_segment_contains(seg, next_address)) {
+        if(!seg ||
+           !rd_i_segment_contains(seg, rd_i_abs(self->context, next_address))) {
             self->done = true;
             return false;
         }
@@ -366,7 +369,7 @@ bool rd_il_step(RDIL* self) {
         RDInstructionVect keep = *v;
         bool done_keep = self->done;
         self->lifted = (RDInstructionVect){0};
-        self->current_address = self->current_address + keep.real_instr.length;
+        self->current_address += keep.real_instr.length;
 
         for(u8 i = 0; i < keep.real_instr.delay_slots; i++)
             rd_il_step(self);
@@ -387,14 +390,14 @@ bool rd_il_step(RDIL* self) {
 
     if(!rd_instr_can_flow(&self->lifted.real_instr) ||
        !_rd_il_can_flow(self->context, self->lifted.real_instr.address,
-                        self->current_address))
+                        rd_i_abs(self->context, self->current_address)))
         self->done = true;
 
     return true;
 }
 
 RDAddress rd_il_current_address(const RDIL* self) {
-    return self->current_address;
+    return rd_i_abs(self->context, self->current_address);
 }
 
 RDILInstructionSlice rd_il_current_il(const RDIL* self) {

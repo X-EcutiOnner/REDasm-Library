@@ -1079,7 +1079,8 @@ bool _rd_i_db_query_has_any_comment(RDContext* ctx, RDAddress address) {
     return false;
 }
 
-void _rd_i_db_query_set_function(RDContext* ctx, const RDFunction* f) {
+void _rd_i_db_query_set_function(RDContext* ctx, RDAddress address,
+                                 const char* type) {
     sqlite3_stmt* stmt = _rd_db_prepare_query(ctx, RD_QUERY_SET_FUNCTION, "\
         INSERT INTO Functions \
             VALUES (:address, :type_name) \
@@ -1087,32 +1088,78 @@ void _rd_i_db_query_set_function(RDContext* ctx, const RDFunction* f) {
             UPDATE SET type_name = EXCLUDED.type_name \
     ");
 
-    _rd_db_bind_param_int(ctx, stmt, ":address", (sqlite3_int64)f->rel_address);
+    _rd_db_bind_param_int(ctx, stmt, ":address",
+                          (sqlite3_int64)rd_i_rel(ctx, address));
 
-    if(f->type_def)
-        _rd_db_bind_param_str(ctx, stmt, ":type_name", f->type_def->name);
+    if(type)
+        _rd_db_bind_param_str(ctx, stmt, ":type_name", type);
     else
         _rd_db_bind_param_null(ctx, stmt, ":type_name");
 
     _rd_db_step(ctx, stmt);
 }
 
-void _rd_i_db_query_load_all_functions(RDContext* ctx) {
+void _rd_i_db_query_del_function(RDContext* ctx, RDAddress address) {
+    sqlite3_stmt* stmt = _rd_db_prepare_query(ctx, RD_QUERY_DEL_FUNCTION, "\
+        DELETE FROM Functions \
+        WHERE address = :address \
+    ");
+
+    _rd_db_bind_param_int(ctx, stmt, ":address",
+                          (sqlite3_int64)rd_i_rel(ctx, address));
+    _rd_db_step(ctx, stmt);
+}
+
+bool _rd_i_db_query_get_function_type(RDContext* ctx, RDAddress address,
+                                      const char** type) {
     sqlite3_stmt* stmt =
-        _rd_db_prepare_query(ctx, RD_QUERY_LOAD_ALL_FUNCTIONS, "\
-        SELECT address, type_name \
-        FROM Functions  \
+        _rd_db_prepare_query(ctx, RD_QUERY_GET_FUNCTION_TYPE, "\
+        SELECT type_name \
+        FROM Functions \
+        WHERE address = :address \
+    ");
+
+    _rd_db_bind_param_int(ctx, stmt, ":address",
+                          (sqlite3_int64)rd_i_rel(ctx, address));
+
+    if(_rd_db_step(ctx, stmt) != SQLITE_ROW) return false;
+
+    if(type) {
+        *type = sqlite3_column_type(stmt, 0) == SQLITE_NULL
+                    ? NULL
+                    : (const char*)sqlite3_column_text(stmt, 0);
+    }
+
+    return true;
+}
+
+RDAddressVect* _rd_i_db_query_get_all_functions(RDContext* ctx,
+                                                RDAddressVect* v) {
+    sqlite3_stmt* stmt =
+        _rd_db_prepare_query(ctx, RD_QUERY_GET_ALL_FUNCTIONS, "\
+        SELECT address \
+        FROM Functions \
         ORDER BY address \
     ");
 
-    assert(vect_is_empty(&ctx->functions));
+    vect_clear(v);
 
     while(_rd_db_step(ctx, stmt) == SQLITE_ROW) {
-        RDRelAddress address = (RDAddress)sqlite3_column_int64(stmt, 0);
-        const char* type_name = (const char*)sqlite3_column_text(stmt, 1);
-        RDFunction* f = rd_i_function_declare(ctx, address, type_name);
-        rd_i_function_rebuild(f);
+        vect_push(v,
+                  rd_i_abs(ctx, (RDRelAddress)sqlite3_column_int64(stmt, 0)));
     }
+
+    return v;
+}
+
+usize _rd_i_db_query_get_function_count(RDContext* ctx) {
+    sqlite3_stmt* stmt = _rd_db_prepare_query(ctx, RD_QUERY_GET_FUNCTION_COUNT,
+                                              "SELECT COUNT(*) FROM Functions");
+
+    if(_rd_db_step(ctx, stmt) == SQLITE_ROW)
+        return (usize)sqlite3_column_int64(stmt, 0);
+
+    return 0;
 }
 
 void _rd_i_db_query_add_problem(RDContext* ctx, RDAddress from,

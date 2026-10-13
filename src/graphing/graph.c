@@ -1,4 +1,5 @@
 #include "graph.h"
+#include "core/context.h"
 #include "support/containers.h"
 #include "support/error.h"
 #include "support/hash/murmur3.h"
@@ -77,10 +78,12 @@ static const char* _rd_graph_generate_dot_to(const RDGraph* self,
         str_append(buf, ";\n");
     }
 
-    if(!vect_is_empty(&self->edges)) str_push(buf, '\n');
+    const RDEdgeVect* edges = rd_i_graph_get_edges_ordered(self);
+
+    if(!vect_is_empty(edges)) str_push(buf, '\n');
 
     const RDGraphEdge* e;
-    vect_each(e, &self->ordered_edges) {
+    vect_each(e, edges) {
         str_append(buf, "\t\"#");
         str_append(buf, rd_i_to_dec((i64)e->src));
         str_append(buf, "\" -> \"#");
@@ -89,7 +92,7 @@ static const char* _rd_graph_generate_dot_to(const RDGraph* self,
     }
 
     str_push(buf, '}');
-    return self->dot_buf.data;
+    return buf->data;
 }
 
 static RDEdgeAttributes* _rd_graph_find_edge_attributes(const RDGraph* self,
@@ -112,6 +115,11 @@ void rd_i_graph_clear(RDGraph* self) {
     vect_clear(&self->outgoing_edges);
     vect_clear(&self->edges);
     vect_clear(&self->nodes);
+    vect_clear(&self->ordered_nodes);
+    vect_clear(&self->ordered_edges);
+    self->is_ordered = false;
+    self->area_width = 0;
+    self->area_height = 0;
     self->node_id = 0;
     self->root = 0;
 }
@@ -180,26 +188,32 @@ void rd_i_graph_remove_incoming_edges(RDGraph* self, RDGraphNode n) {
 
 void rd_i_graph_remove_edges(RDGraph* self, RDGraphNode n) {
     for(usize i = 0; i < vect_length(&self->edges);) {
-        RDGraphEdge* e = vect_at(&self->edges, i);
+        // copy: removal invalidates the pointer
+        RDGraphEdge e = *vect_at(&self->edges, i);
 
-        if(e->src == n || e->dst == n)
-            vect_del(&self->edges, vect_idx(&self->edge_attributes, e), 1);
+        if(e.src == n || e.dst == n) {
+            rd_graph_remove_edge(self, &e);
+        }
         else
             i++;
     }
 }
 
-RDGraph* rd_graph_create(void) {
-    return rd_graph_create_ex(sizeof(RDGraph), NULL);
+RDGraph* rd_graph_create(RDContext* ctx) {
+    return rd_graph_create_ex(ctx, sizeof(RDGraph), NULL);
 }
 
-RDGraph* rd_graph_create_ex(usize n, RDGraphDestroy d) {
+RDGraph* rd_graph_create_ex(RDContext* ctx, usize n, RDGraphDestroy d) {
+    if(!ctx) return NULL;
+
     panic_if(n < sizeof(RDGraph),
              "graph size %zu is smaller than RDGraph (%zu)", n,
              sizeof(RDGraph));
 
     RDGraph* self = rd_alloc0(1, n);
+    self->context = ctx;
     self->destroy = d;
+    self->gen = ++ctx->graph_gen;
     return self;
 }
 
@@ -521,8 +535,10 @@ void rd_graph_set_edge_arrow(RDGraph* self, const RDGraphEdge* e,
 }
 
 bool rd_graph_is_same(const RDGraph* self, const RDGraph* g) {
-    return (self && g) && self->gen == g->gen;
+    return (self && g) && self->context == g->context && self->gen == g->gen;
 }
+
+u32 rd_graph_get_gen(const RDGraph* self) { return self ? self->gen : 0; }
 
 u32 rd_graph_get_hash(const RDGraph* self, RDGraphPropCallback cb,
                       void* userdata) {
@@ -573,6 +589,8 @@ bool rd_graph_order(RDGraph* self, RDGraphOrderCallback cb, void* userdata) {
         vect_push(&self->ordered_nodes, o->node);
     }
 
+    self->is_ordered = true;
+
     // order edges
     const RDGraphEdge* e;
     vect_each(e, &self->edges) {
@@ -585,7 +603,6 @@ bool rd_graph_order(RDGraph* self, RDGraphOrderCallback cb, void* userdata) {
 
     vect_sort(&self->ordered_edges, _rd_graph_edge_ord_cmp);
 
-    self->is_ordered = true;
     vect_destroy(&ord_nodes);
     return true;
 }
