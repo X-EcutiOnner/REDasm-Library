@@ -68,7 +68,7 @@ static u64 _rd_functiongraph_weight(const RDGraph* g, RDGraphNode n, void* ud) {
     const RDFunctionGraphNode* d =
         _rd_functiongraph_node((const RDFunctionGraph*)g, n);
     assert(d && "node without chunk");
-    return d->chunk.start;
+    return d ? d->chunk.start : 0;
 }
 
 static const char* _rd_functiongraph_dot_props(const RDGraph* g, RDGraphNode n,
@@ -135,6 +135,8 @@ bool rd_functiongraph_populate(RDFunctionGraph* self, RDAddress entry) {
 
         RDFunctionGraphNode* fg_node = _rd_functiongraph_node(self, src);
         assert(fg_node);
+        if(!fg_node) continue;
+
         fg_node->noret_end = noret_end;
 
         const RDChunkSucc* s;
