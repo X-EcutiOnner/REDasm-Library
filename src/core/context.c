@@ -376,6 +376,8 @@ const RDSegment* rd_segment_find(const RDContext* self, RDAddress addr) {
 }
 
 bool rd_to_offset(const RDContext* self, RDAddress address, RDOffset* offset) {
+    if(!rd_is_address(self, address)) return false;
+
     const RDInputMappingVect* mappings = rd_i_db_get_mappings(self);
 
     RDRelAddress rel_address = rd_i_rel(self, address);
