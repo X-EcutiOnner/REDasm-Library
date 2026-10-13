@@ -371,7 +371,7 @@ bool rd_map_input_n(RDContext* self, RDOffset off, RDRelAddress addr, usize n) {
     return rd_map_input(self, off, addr, addr + n);
 }
 
-const RDSegment* rd_find_segment(const RDContext* self, RDAddress addr) {
+const RDSegment* rd_segment_find(const RDContext* self, RDAddress addr) {
     return rd_i_db_find_segment(self, addr);
 }
 

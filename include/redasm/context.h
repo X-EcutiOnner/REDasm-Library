@@ -152,7 +152,7 @@ RD_API bool rd_set_base_address(RDContext* self, RDAddress a);
 RD_API void rd_set_scan_char16(RDContext* self, bool b);
 RD_API void rd_set_min_string(RDContext* self, int l);
 RD_API void rd_set_string_terminators(RDContext* ctx, const u8* terms, usize n);
-RD_API const RDSegment* rd_find_segment(const RDContext* self, RDAddress addr);
+RD_API const RDSegment* rd_segment_find(const RDContext* self, RDAddress addr);
 RD_API const RDLoaderPlugin* rd_get_loader_plugin(const RDContext* self);
 RD_API const RDProcessorPlugin* rd_get_processor_plugin(const RDContext* self);
 RD_API RDAnalyzerItemSlice rd_get_analyzer_plugins(const RDContext* self);
