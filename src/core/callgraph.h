@@ -9,6 +9,7 @@ typedef struct RDCallGraph {
     RDGraph base;
     RDXRefVect xrefs_buf;
     RDChunkVect chunks_buf;
+    RDCharVect fmt_buf;
 
     struct {
         RDGraphNode* data;
