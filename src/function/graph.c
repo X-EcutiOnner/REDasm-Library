@@ -76,7 +76,7 @@ static const char* _rd_functiongraph_dot_props(const RDGraph* g, RDGraphNode n,
     RDFunctionGraph* self = (RDFunctionGraph*)ud;
     const RDFunctionGraphNode* d =
         _rd_functiongraph_node((const RDFunctionGraph*)g, n);
-    return rd_i_format(&self->fmt_buf, "[label=\"0x%" PRIX64 "\", noret = %s]",
+    return rd_i_format(&self->fmt_buf, "[label=\"0x%" PRIX64 "\", noret=%s]",
                        rd_i_abs(self->base.context, d->chunk.start),
                        d->noret_end ? "true" : "false");
 }
@@ -162,7 +162,12 @@ bool rd_functiongraph_populate(RDFunctionGraph* self, RDAddress entry) {
 
     vect_destroy(&refs);
     vect_destroy(&succ);
-    rd_graph_order(g, _rd_functiongraph_weight, NULL);
+
+    if(!rd_graph_order(g, _rd_functiongraph_weight, NULL)) {
+        rd_functiongraph_destroy(self);
+        panic("ordering failed at 0x%" PRIX64, entry);
+        return NULL;
+    }
 
     return true;
 }
