@@ -38,12 +38,10 @@ typedef struct RDChunkVect {
 } RDChunkVect;
 
 const RDChunk* rd_i_chunks_find(const RDContext* ctx, RDAddress address);
-void rd_i_chunks_rebuild(RDContext* ctx);
+void rd_i_chunks_build_all(RDContext* ctx);
 void rd_i_chunks_collect(RDContext* ctx, RDAddress entry, RDChunkVect* out);
 void rd_i_chunks_del(RDContext* ctx, RDAddress entry);
 void rd_i_chunks_rebuild_at(RDContext* ctx, RDAddress entry);
-void rd_i_chunks_build(RDContext* ctx, RDAddress entry, RDChunkVect* out);
-void rd_i_chunks_sort(RDChunkVect* self);
 const RDChunk* rd_i_chunks_find_start(const RDContext* ctx, RDAddress start,
                                       RDAddress entry);
 

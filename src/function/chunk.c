@@ -2,13 +2,14 @@
 #include "core/context.h"
 #include "io/flags.h"
 #include "io/flagsbuffer.h"
+#include <inttypes.h>
 
 static bool _rd_chunk_is_tail_call(const RDContext* ctx, RDAddress entry,
                                    RDAddress target) {
     if(target == entry) return false; // loop to own entry
 
     const RDSegment* seg = rd_i_db_find_segment(ctx, target);
-    if(!seg) return false;
+    if(!seg || !rd_segment_has_perm(seg, RD_SP_X)) return false;
 
     return rd_flagsbuffer_has_func(seg->flags, rd_i_address2index(seg, target));
 }
@@ -113,108 +114,47 @@ static bool _rd_chunk_claim(RDContext* ctx, RDAddressVect* seen,
     return true;
 }
 
-const RDChunk* rd_i_chunks_find(const RDContext* ctx, RDAddress address) {
-    if(!rd_is_address(ctx, address) || vect_is_empty(&ctx->chunks)) return NULL;
+static const RDChunk* _rd_chunk_find_owner(const RDChunkVect* known,
+                                           RDRelAddress start) {
+    // sorted by (start, entry): the first match is the lowest entry
+    usize i = vect_lower_bound(known, &start, _rd_chunk_start_kcmp_pred);
+    if(i < vect_length(known) && vect_at(known, i)->start == start)
+        return vect_at(known, i);
 
-    RDRelAddress rel = rd_i_rel(ctx, address);
-    usize idx = vect_bsearch(&ctx->chunks, &rel, _rd_chunk_range_kcmp_pred);
-    return idx != vect_length(&ctx->chunks) ? vect_at(&ctx->chunks, idx) : NULL;
+    return NULL;
 }
 
-void rd_i_chunks_rebuild(RDContext* ctx) {
-    RDChunkVect chunks = {0};
-    vect_reserve(&chunks, vect_capacity(&ctx->chunks));
+static bool _rd_chunk_is_foreign(const RDContext* ctx, const RDChunkVect* known,
+                                 RDAddress entry, RDAddress start) {
+    const RDChunk* o = _rd_chunk_find_owner(known, rd_i_rel(ctx, start));
+    if(!o) return false;
 
-    RDAddressVect functions = {0};
-    rd_i_db_get_all_functions(ctx, &functions);
+    RDRelAddress rel_entry = rd_i_rel(ctx, entry);
+    if(o->entry < rel_entry) return true;
+    if(o->entry == rel_entry) return false;
 
-    const RDAddress* addr;
-    vect_each(addr, &functions) { rd_i_chunks_build(ctx, *addr, &chunks); }
+    panic("chunk 0x%" PRIX64 " of 0x%" PRIX64 " is owned by higher entry",
+          start, entry);
 
-    rd_i_chunks_sort(&chunks);
-    mem_swap(RDChunkVect, &ctx->chunks, &chunks);
-    vect_destroy(&functions);
-    vect_destroy(&chunks);
+    return false;
 }
 
-void rd_i_chunks_collect(RDContext* ctx, RDAddress entry, RDChunkVect* out) {
-    assert(out);
-    vect_clear(out);
-
-    const RDChunk* head = rd_i_chunks_find_head(ctx, entry);
-    if(!head) return;
-
-    RDRelAddress rel_entry = head->entry;
-
-    RDChunkVect work = {0};
-    RDAddressVect seen = {0};
-    RDChunkSuccVect succ = {0};
-    RDXRefVect refs = {0};
-
-    vect_push(&work, *head);
-    vect_push(&seen, rd_i_abs(ctx, head->start));
-
-    while(!vect_is_empty(&work)) {
-        RDChunk c =
-            vect_pop_last(&work); // copy: 'ctx->chunks' is never aliased
-        vect_push(out, c);
-
-        bool noret_end;
-        rd_i_chunk_successors(ctx, &c, &succ, &refs, &noret_end);
-
-        const RDChunkSucc* s;
-        vect_each(s, &succ) {
-            if(!rd_is_address(ctx, s->address)) continue;
-
-            const RDChunk* t = rd_i_chunks_find_start_rel(
-                ctx, rd_i_rel(ctx, s->address), rel_entry);
-            if(!t) continue;
-
-            usize i =
-                vect_lower_bound(&seen, &s->address, rd_i_address_kcmp_pred);
-            if(i < vect_length(&seen) && *vect_at(&seen, i) == s->address)
-                continue;
-
-            vect_ins(&seen, i, s->address);
-            vect_push(&work, *t);
-        }
-    }
-
-    rd_i_chunks_sort(out);
-    vect_destroy(&work);
-    vect_destroy(&seen);
-    vect_destroy(&succ);
-    vect_destroy(&refs);
+static void _rd_chunks_insert(RDChunkVect* chunks, const RDChunk* c) {
+    usize idx = vect_lower_bound(chunks, c, _rd_chunk_cmp_pred);
+    vect_ins(chunks, idx, *c);
 }
 
-void rd_i_chunks_del(RDContext* ctx, RDAddress entry) {
-    RDRelAddress rel = rd_i_rel(ctx, entry);
-    vect_del_if(&ctx->chunks, &rel, _rd_chunk_del_if_pred);
-}
-
-void rd_i_chunks_rebuild_at(RDContext* ctx, RDAddress entry) {
-    rd_i_chunks_del(ctx, entry);
-
-    RDChunkVect new_chunks = {0};
-    rd_i_chunks_build(ctx, entry, &new_chunks);
-
-    const RDChunk* c;
-    vect_each(c, &new_chunks) {
-        usize idx = vect_lower_bound(&ctx->chunks, c, _rd_chunk_cmp_pred);
-        vect_ins(&ctx->chunks, idx, *c);
-    }
-
-    vect_destroy(&new_chunks);
-}
-
-void rd_i_chunks_build(RDContext* ctx, RDAddress entry, RDChunkVect* out) {
-    usize base = vect_length(out);
+static void _rd_chunks_build(RDContext* ctx, RDAddress entry,
+                             RDChunkVect* chunks) {
     RDAddressVect work = {0};
     RDAddressVect seen = {0}; // sorted: replaces the O(n) node scan
     RDChunkSuccVect succ = {0};
     RDXRefVect xrefs = {0};
     bool has_noret_exit = false, all_exits_noret = true;
     u32 gen = ++ctx->chunk_gen;
+
+    RDChunk head = {0};
+    bool has_head = false;
 
     if(_rd_chunk_claim(ctx, &seen, entry)) vect_push(&work, entry);
 
@@ -228,12 +168,14 @@ void rd_i_chunks_build(RDContext* ctx, RDAddress entry, RDChunkVect* out) {
         usize n_edges = 0;
         const RDChunkSucc* s;
         vect_each(s, &succ) {
+            if(!_rd_chunk_is_valid_target(ctx, s->address)) continue;
+            if(_rd_chunk_is_foreign(ctx, chunks, entry, s->address)) continue;
+
             // exec segment, not seen yet
             if(_rd_chunk_claim(ctx, &seen, s->address))
                 vect_push(&work, s->address);
 
-            if(_rd_chunk_is_valid_target(ctx, s->address))
-                n_edges++; // old 'dst != 0'
+            n_edges++;
         }
 
         if(!n_edges) { // exit chunk
@@ -243,20 +185,23 @@ void rd_i_chunks_build(RDContext* ctx, RDAddress entry, RDChunkVect* out) {
                 all_exits_noret = false;
         }
 
-        vect_push(out, c);
+        if(!has_head) { // first popped: held back until is_noret is known
+            head = c;
+            has_head = true;
+        }
+        else
+            _rd_chunks_insert(chunks, &c);
     }
 
-    if(vect_length(out) > base) // head is the first one popped
-        vect_at(out, base)->is_noret = has_noret_exit && all_exits_noret;
+    if(has_head) {
+        head.is_noret = has_noret_exit && all_exits_noret;
+        _rd_chunks_insert(chunks, &head);
+    }
 
     vect_destroy(&work);
     vect_destroy(&seen);
     vect_destroy(&succ);
     vect_destroy(&xrefs);
-}
-
-void rd_i_chunks_sort(RDChunkVect* self) {
-    vect_sort(self, _rd_chunk_cmp_pred);
 }
 
 void rd_i_chunk_successors(RDContext* ctx, const RDChunk* c,
@@ -322,4 +267,89 @@ const RDChunk* rd_i_chunks_find_start_rel(const RDContext* ctx,
     }
 
     return NULL;
+}
+
+const RDChunk* rd_i_chunks_find(const RDContext* ctx, RDAddress address) {
+    if(!rd_is_address(ctx, address) || vect_is_empty(&ctx->chunks)) return NULL;
+
+    RDRelAddress rel = rd_i_rel(ctx, address);
+    usize idx = vect_bsearch(&ctx->chunks, &rel, _rd_chunk_range_kcmp_pred);
+    return idx != vect_length(&ctx->chunks) ? vect_at(&ctx->chunks, idx) : NULL;
+}
+
+void rd_i_chunks_build_all(RDContext* ctx) {
+    RDChunkVect chunks = {0};
+    vect_reserve(&chunks, vect_capacity(&ctx->chunks));
+
+    RDAddressVect functions = {0};
+    rd_i_db_get_all_functions(ctx, &functions);
+
+    RDAddressVect owned = {0};
+    const RDAddress* addr;
+    vect_each(addr, &functions) { _rd_chunks_build(ctx, *addr, &chunks); }
+
+    mem_swap(RDChunkVect, &ctx->chunks, &chunks);
+    vect_destroy(&owned);
+    vect_destroy(&functions);
+    vect_destroy(&chunks);
+}
+
+void rd_i_chunks_collect(RDContext* ctx, RDAddress entry, RDChunkVect* out) {
+    assert(out);
+    vect_clear(out);
+
+    const RDChunk* head = rd_i_chunks_find_head(ctx, entry);
+    if(!head) return;
+
+    RDRelAddress rel_entry = head->entry;
+
+    RDChunkVect work = {0};
+    RDAddressVect seen = {0};
+    RDChunkSuccVect succ = {0};
+    RDXRefVect refs = {0};
+
+    vect_push(&work, *head);
+    vect_push(&seen, rd_i_abs(ctx, head->start));
+
+    while(!vect_is_empty(&work)) {
+        RDChunk c =
+            vect_pop_last(&work); // copy: 'ctx->chunks' is never aliased
+        vect_push(out, c);
+
+        bool noret_end;
+        rd_i_chunk_successors(ctx, &c, &succ, &refs, &noret_end);
+
+        const RDChunkSucc* s;
+        vect_each(s, &succ) {
+            if(!rd_is_address(ctx, s->address)) continue;
+
+            const RDChunk* t = rd_i_chunks_find_start_rel(
+                ctx, rd_i_rel(ctx, s->address), rel_entry);
+            if(!t) continue;
+
+            usize i =
+                vect_lower_bound(&seen, &s->address, rd_i_address_kcmp_pred);
+            if(i < vect_length(&seen) && *vect_at(&seen, i) == s->address)
+                continue;
+
+            vect_ins(&seen, i, s->address);
+            vect_push(&work, *t);
+        }
+    }
+
+    vect_sort(out, _rd_chunk_cmp_pred);
+    vect_destroy(&work);
+    vect_destroy(&seen);
+    vect_destroy(&succ);
+    vect_destroy(&refs);
+}
+
+void rd_i_chunks_del(RDContext* ctx, RDAddress entry) {
+    RDRelAddress rel = rd_i_rel(ctx, entry);
+    vect_del_if(&ctx->chunks, &rel, _rd_chunk_del_if_pred);
+}
+
+void rd_i_chunks_rebuild_at(RDContext* ctx, RDAddress entry) {
+    rd_i_chunks_del(ctx, entry);
+    _rd_chunks_build(ctx, entry, &ctx->chunks);
 }

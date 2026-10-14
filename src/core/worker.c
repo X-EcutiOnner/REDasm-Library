@@ -47,7 +47,7 @@ static void _rd_worker_next_or_emulate(RDContext* ctx) {
 
 static void _rd_worker_rebuild_chunks(RDContext* ctx) {
     RD_LOG_INFO("generating chunks");
-    rd_i_chunks_rebuild(ctx);
+    rd_i_chunks_build_all(ctx);
 }
 
 static void _rd_worker_follow_pointers(RDContext* ctx) {
