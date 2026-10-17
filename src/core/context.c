@@ -411,6 +411,21 @@ bool rd_to_address(const RDContext* self, RDOffset offset, RDAddress* address) {
     return false;
 }
 
+bool rd_is_readable(const RDContext* self, RDAddress address) {
+    const RDSegment* seg = rd_i_db_find_segment(self, address);
+    return rd_segment_has_perm(seg, RD_SP_R);
+}
+
+bool rd_is_writable(const RDContext* self, RDAddress address) {
+    const RDSegment* seg = rd_i_db_find_segment(self, address);
+    return rd_segment_has_perm(seg, RD_SP_W);
+}
+
+bool rd_is_executable(const RDContext* self, RDAddress address) {
+    const RDSegment* seg = rd_i_db_find_segment(self, address);
+    return rd_segment_has_perm(seg, RD_SP_X);
+}
+
 bool rd_is_address(const RDContext* self, RDAddress address) {
     return rd_i_db_find_segment(self, address) != NULL;
 }
@@ -422,6 +437,12 @@ bool rd_is_offset(const RDContext* self, RDOffset offset) {
 bool rd_is_function(const RDContext* self, RDAddress address) {
     const RDSegment* seg = rd_i_db_find_segment(self, address);
     return seg && rd_flagsbuffer_has_func(seg->flags,
+                                          rd_i_address2index(seg, address));
+}
+
+bool rd_is_code(const RDContext* self, RDAddress address) {
+    const RDSegment* seg = rd_i_db_find_segment(self, address);
+    return seg && rd_flagsbuffer_has_code(seg->flags,
                                           rd_i_address2index(seg, address));
 }
 
