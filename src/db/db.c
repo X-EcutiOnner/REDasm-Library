@@ -525,18 +525,20 @@ bool rd_i_db_set_sregval(RDContext* ctx, RDAddress address, const char* regname,
     RDSegmentRegVect* rv = _rd_i_db_segmentregs_get_vect(
         &ctx->db->segment_regs, &ctx->db->segment_reg_names, interned);
 
+    RDRelAddress rel_address = rd_i_rel(ctx, address);
+
     RDSegmentReg entry = {
-        .address = rd_i_rel(ctx, address),
+        .address = rel_address,
         .name = interned,
         .value = val,
         .has_value = true,
         .confidence = c,
     };
 
-    RDSegmentReg key = {.address = rd_i_rel(ctx, address)};
+    RDSegmentReg key = {.address = rel_address};
     usize idx = vect_lower_bound(rv, &key, _rd_i_db_segmentreg_cmp);
 
-    if(idx < vect_length(rv) && vect_at(rv, idx)->address == address) {
+    if(idx < vect_length(rv) && vect_at(rv, idx)->address == rel_address) {
         if(c < vect_at(rv, idx)->confidence) return false;
         *vect_at(rv, idx) = entry;
         return true;
@@ -553,18 +555,20 @@ bool rd_i_db_del_sregval(RDContext* ctx, RDAddress address, const char* regname,
         _rd_i_db_segmentregs_find_vect(&ctx->db->segment_regs, interned);
     if(!rv) return false;
 
+    RDRelAddress rel_address = rd_i_rel(ctx, address);
+
     RDSegmentReg entry = {
-        .address = rd_i_rel(ctx, address),
+        .address = rel_address,
         .name = interned,
         .value = 0,
         .has_value = false,
         .confidence = c,
     };
 
-    RDSegmentReg key = {.address = rd_i_rel(ctx, address)};
+    RDSegmentReg key = {.address = rel_address};
     usize idx = vect_lower_bound(rv, &key, _rd_i_db_segmentreg_cmp);
 
-    if(idx < vect_length(rv) && vect_at(rv, idx)->address == address) {
+    if(idx < vect_length(rv) && vect_at(rv, idx)->address == rel_address) {
         if(c < vect_at(rv, idx)->confidence) return false;
         *vect_at(rv, idx) = entry;
         return true;
